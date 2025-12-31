@@ -22,11 +22,6 @@ extern "C" {
 #include <cairo.h>
 // local copies of private weaver types/methods
 #include <weaver_image.h>
-
-// Access matron's global cairo context directly
-// This is defined in screen.c as: static cairo_t *cr_primary;
-// But it may be exported as a symbol we can access
-extern cairo_t *cr_primary;
 }
 
 struct FramebufferInfo {
@@ -39,7 +34,12 @@ struct FramebufferInfo {
     int line_length;
 };
 
-std::map<cairo_surface_t*, FramebufferInfo*> surface_fb_map;
+// Our own cairo surface and context for mirroring screen drawing
+static cairo_surface_t* mirror_surface = NULL;
+static cairo_t* mirror_ctx = NULL;
+
+// Single framebuffer info for HDMI output
+static FramebufferInfo* hdmi_fb = NULL;
 
 static bool running = false;
 static bool initialized = false;
@@ -103,10 +103,9 @@ void scale_and_copy_buffer(unsigned char* src, int src_width, int src_height, in
     }
 }
 
-int create_framebuffer_output(cairo_surface_t* surface, const char* device_path) {
-    auto it = surface_fb_map.find(surface);
-    if (it != surface_fb_map.end()) {
-        MSG("a framebuffer output already exists for this surface");
+int open_hdmi_framebuffer(const char* device_path) {
+    if (hdmi_fb != NULL) {
+        MSG("framebuffer already open");
         return 0;
     }
 
@@ -114,7 +113,7 @@ int create_framebuffer_output(cairo_surface_t* surface, const char* device_path)
     int fd = open(device_path, O_RDWR);
     if (fd < 0) {
         MSG("error opening framebuffer device " << device_path << ": " << strerror(errno));
-        return 0;
+        return -1;
     }
 
     // Get fixed screen information
@@ -122,7 +121,7 @@ int create_framebuffer_output(cairo_surface_t* surface, const char* device_path)
     if (ioctl(fd, FBIOGET_FSCREENINFO, &finfo) < 0) {
         MSG("error reading fixed screen info: " << strerror(errno));
         close(fd);
-        return 0;
+        return -1;
     }
 
     // Get variable screen information
@@ -130,38 +129,37 @@ int create_framebuffer_output(cairo_surface_t* surface, const char* device_path)
     if (ioctl(fd, FBIOGET_VSCREENINFO, &vinfo) < 0) {
         MSG("error reading variable screen info: " << strerror(errno));
         close(fd);
-        return 0;
+        return -1;
     }
 
     // Store framebuffer info
-    FramebufferInfo* fbinfo = new FramebufferInfo();
-    fbinfo->fd = fd;
-    fbinfo->width = vinfo.xres;
-    fbinfo->height = vinfo.yres;
-    fbinfo->bpp = vinfo.bits_per_pixel;
-    fbinfo->line_length = finfo.line_length;
-    fbinfo->screen_size = finfo.smem_len;
+    hdmi_fb = new FramebufferInfo();
+    hdmi_fb->fd = fd;
+    hdmi_fb->width = vinfo.xres;
+    hdmi_fb->height = vinfo.yres;
+    hdmi_fb->bpp = vinfo.bits_per_pixel;
+    hdmi_fb->line_length = finfo.line_length;
+    hdmi_fb->screen_size = finfo.smem_len;
 
     // Memory map the framebuffer
-    fbinfo->mapped_mem = (uint8_t*)mmap(0, fbinfo->screen_size,
+    hdmi_fb->mapped_mem = (uint8_t*)mmap(0, hdmi_fb->screen_size,
                                         PROT_READ | PROT_WRITE,
                                         MAP_SHARED, fd, 0);
 
-    if (fbinfo->mapped_mem == MAP_FAILED) {
+    if (hdmi_fb->mapped_mem == MAP_FAILED) {
         MSG("error mapping framebuffer: " << strerror(errno));
         close(fd);
-        delete fbinfo;
-        return 0;
+        delete hdmi_fb;
+        hdmi_fb = NULL;
+        return -1;
     }
 
-    surface_fb_map[surface] = fbinfo;
-
-    MSG("framebuffer output created: " << fbinfo->width << "x" << fbinfo->height
-        << " @ " << fbinfo->bpp << "bpp (device: " << device_path << ")");
+    MSG("framebuffer output created: " << hdmi_fb->width << "x" << hdmi_fb->height
+        << " @ " << hdmi_fb->bpp << "bpp (device: " << device_path << ")");
 
     // Update scaling based on actual resolution
-    output_width = fbinfo->width;
-    output_height = fbinfo->height;
+    output_width = hdmi_fb->width;
+    output_height = hdmi_fb->height;
     scale_x = output_width / 128;
     scale_y = scale_x; // Keep square pixels
     offset_y = (output_height - (64 * scale_y)) / 2;
@@ -171,59 +169,72 @@ int create_framebuffer_output(cairo_surface_t* surface, const char* device_path)
     return 0;
 }
 
-int destroy_framebuffer_output(cairo_surface_t* surface) {
-    auto it = surface_fb_map.find(surface);
-    if (it == surface_fb_map.end()) {
-        MSG("No framebuffer output exists for this surface");
-        return 0;
+void close_hdmi_framebuffer() {
+    if (hdmi_fb == NULL) {
+        return;
     }
 
-    FramebufferInfo* fbinfo = it->second;
-
-    if (fbinfo->mapped_mem != MAP_FAILED) {
-        munmap(fbinfo->mapped_mem, fbinfo->screen_size);
+    if (hdmi_fb->mapped_mem != MAP_FAILED) {
+        munmap(hdmi_fb->mapped_mem, hdmi_fb->screen_size);
     }
 
-    if (fbinfo->fd >= 0) {
-        close(fbinfo->fd);
+    if (hdmi_fb->fd >= 0) {
+        close(hdmi_fb->fd);
     }
 
-    delete fbinfo;
-    surface_fb_map.erase(it);
+    delete hdmi_fb;
+    hdmi_fb = NULL;
 
-    MSG("framebuffer output destroyed");
-    return 0;
+    MSG("framebuffer output closed");
 }
 
 int initialize_hdmi() {
     if (!initialized && !failed) {
         MSG("HDMI output service initializing");
-        initialized = true;
 
-        // create the default framebuffer output
-        // Access the primary cairo context directly
-        if (cr_primary == NULL) {
-            MSG("failed to get screen context");
+        // Create our own cairo surface for mirroring (128x64, ARGB32 like norns)
+        mirror_surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, 128, 64);
+        if (cairo_surface_status(mirror_surface) != CAIRO_STATUS_SUCCESS) {
+            MSG("failed to create mirror surface");
             failed = true;
             return 0;
         }
-        cairo_t* ctx = cr_primary;
 
-        cairo_surface_t* surface = cairo_get_target(ctx);
-
-        // Try /dev/fb0 first, then /dev/fb1
-        int result = create_framebuffer_output(surface, "/dev/fb0");
-        if (surface_fb_map.find(surface) == surface_fb_map.end()) {
-            result = create_framebuffer_output(surface, "/dev/fb1");
+        // Create cairo context for our surface
+        mirror_ctx = cairo_create(mirror_surface);
+        if (cairo_status(mirror_ctx) != CAIRO_STATUS_SUCCESS) {
+            MSG("failed to create mirror context");
+            cairo_surface_destroy(mirror_surface);
+            mirror_surface = NULL;
+            failed = true;
+            return 0;
         }
 
-        if (surface_fb_map.find(surface) == surface_fb_map.end()) {
+        // Set default drawing state to match norns
+        cairo_set_source_rgb(mirror_ctx, 1.0, 1.0, 1.0);
+        cairo_set_line_width(mirror_ctx, 1.0);
+        cairo_set_line_cap(mirror_ctx, CAIRO_LINE_CAP_ROUND);
+        cairo_set_line_join(mirror_ctx, CAIRO_LINE_JOIN_ROUND);
+
+        MSG("mirror surface created: 128x64");
+
+        // Try to open framebuffer device
+        int result = open_hdmi_framebuffer("/dev/fb0");
+        if (result < 0) {
+            result = open_hdmi_framebuffer("/dev/fb1");
+        }
+
+        if (hdmi_fb == NULL) {
             MSG("failed to open any framebuffer device");
+            cairo_destroy(mirror_ctx);
+            cairo_surface_destroy(mirror_surface);
+            mirror_ctx = NULL;
+            mirror_surface = NULL;
             failed = true;
-            initialized = false;
             return 0;
         }
 
+        initialized = true;
         MSG("HDMI output service initialized");
     }
     return 0;
@@ -234,52 +245,47 @@ int cleanup_hdmi() {
     if (initialized) {
         initialized = false;
 
-        for (auto& kv : surface_fb_map) {
-            FramebufferInfo* fbinfo = kv.second;
-            if (fbinfo->mapped_mem != MAP_FAILED) {
-                munmap(fbinfo->mapped_mem, fbinfo->screen_size);
-            }
-            if (fbinfo->fd >= 0) {
-                close(fbinfo->fd);
-            }
-            delete fbinfo;
+        // Destroy our cairo context and surface
+        if (mirror_ctx != NULL) {
+            cairo_destroy(mirror_ctx);
+            mirror_ctx = NULL;
         }
-        surface_fb_map.clear();
+        if (mirror_surface != NULL) {
+            cairo_surface_destroy(mirror_surface);
+            mirror_surface = NULL;
+        }
+
+        // Close framebuffer
+        close_hdmi_framebuffer();
 
         MSG("HDMI output service stopped");
     }
     return 0;
 }
 
-int send_surface_to_framebuffer(cairo_surface_t* surface)
+int send_mirror_to_framebuffer()
 {
-    if (initialized && !failed) {
-        // locate the framebuffer output
-        auto it = surface_fb_map.find(surface);
-        if (it == surface_fb_map.end()) {
-            // no framebuffer output registered for this surface
-            return 0;
-        }
-        FramebufferInfo* fbinfo = it->second;
+    if (!initialized || failed || hdmi_fb == NULL || mirror_surface == NULL) {
+        return 0;
+    }
 
-        // prepare the surface
-        if (cairo_surface_get_type(surface) != CAIRO_SURFACE_TYPE_IMAGE ||
-            cairo_surface_status(surface) != CAIRO_STATUS_SUCCESS) {
-            return 0;
-        }
-        cairo_surface_flush(surface);
+    // Prepare the mirror surface
+    if (cairo_surface_get_type(mirror_surface) != CAIRO_SURFACE_TYPE_IMAGE ||
+        cairo_surface_status(mirror_surface) != CAIRO_STATUS_SUCCESS) {
+        return 0;
+    }
+    cairo_surface_flush(mirror_surface);
 
-        // get surface data and scale/copy to framebuffer
-        unsigned char* data = cairo_image_surface_get_data(surface);
-        if (data != NULL) {
-            int src_width = cairo_image_surface_get_width(surface);
-            int src_height = cairo_image_surface_get_height(surface);
-            int src_stride = cairo_image_surface_get_stride(surface);
+    // Get surface data and scale/copy to framebuffer
+    unsigned char* data = cairo_image_surface_get_data(mirror_surface);
+    if (data != NULL) {
+        int src_width = cairo_image_surface_get_width(mirror_surface);
+        int src_height = cairo_image_surface_get_height(mirror_surface);
+        int src_stride = cairo_image_surface_get_stride(mirror_surface);
 
-            scale_and_copy_buffer(data, src_width, src_height, src_stride,
-                                fbinfo->mapped_mem, fbinfo->width, fbinfo->height,
-                                fbinfo->line_length);
-        }
+        scale_and_copy_buffer(data, src_width, src_height, src_stride,
+                            hdmi_fb->mapped_mem, hdmi_fb->width, hdmi_fb->height,
+                            hdmi_fb->line_length);
     }
     return 0;
 }
@@ -301,12 +307,88 @@ static int hdmi_mod_cleanup(lua_State *l) {
 static int hdmi_mod_update(lua_State *l) {
     lua_check_num_args(0);
     if (running) {
-        // Access the primary cairo context directly
-        if (cr_primary == NULL) {
-            return 0;
-        }
-        cairo_surface_t* surface = cairo_get_target(cr_primary);
-        return send_surface_to_framebuffer(surface);
+        return send_mirror_to_framebuffer();
+    }
+    return 0;
+}
+
+// Screen drawing wrapper functions - these mirror the norns screen API
+// and draw to our mirror surface
+
+static int hdmi_mod_clear(lua_State *l) {
+    lua_check_num_args(0);
+    if (mirror_ctx != NULL) {
+        cairo_save(mirror_ctx);
+        cairo_set_operator(mirror_ctx, CAIRO_OPERATOR_CLEAR);
+        cairo_paint(mirror_ctx);
+        cairo_restore(mirror_ctx);
+    }
+    return 0;
+}
+
+static int hdmi_mod_move(lua_State *l) {
+    lua_check_num_args(2);
+    double x = luaL_checknumber(l, 1);
+    double y = luaL_checknumber(l, 2);
+    if (mirror_ctx != NULL) {
+        cairo_move_to(mirror_ctx, x, y);
+    }
+    return 0;
+}
+
+static int hdmi_mod_line(lua_State *l) {
+    lua_check_num_args(2);
+    double x = luaL_checknumber(l, 1);
+    double y = luaL_checknumber(l, 2);
+    if (mirror_ctx != NULL) {
+        cairo_line_to(mirror_ctx, x, y);
+    }
+    return 0;
+}
+
+static int hdmi_mod_rect(lua_State *l) {
+    lua_check_num_args(4);
+    double x = luaL_checknumber(l, 1);
+    double y = luaL_checknumber(l, 2);
+    double w = luaL_checknumber(l, 3);
+    double h = luaL_checknumber(l, 4);
+    if (mirror_ctx != NULL) {
+        cairo_rectangle(mirror_ctx, x, y, w, h);
+    }
+    return 0;
+}
+
+static int hdmi_mod_stroke(lua_State *l) {
+    lua_check_num_args(0);
+    if (mirror_ctx != NULL) {
+        cairo_stroke(mirror_ctx);
+    }
+    return 0;
+}
+
+static int hdmi_mod_fill(lua_State *l) {
+    lua_check_num_args(0);
+    if (mirror_ctx != NULL) {
+        cairo_fill(mirror_ctx);
+    }
+    return 0;
+}
+
+static int hdmi_mod_level(lua_State *l) {
+    lua_check_num_args(1);
+    int level = luaL_checkinteger(l, 1);
+    if (mirror_ctx != NULL) {
+        double brightness = level / 15.0;
+        cairo_set_source_rgb(mirror_ctx, brightness, brightness, brightness);
+    }
+    return 0;
+}
+
+static int hdmi_mod_line_width(lua_State *l) {
+    lua_check_num_args(1);
+    double width = luaL_checknumber(l, 1);
+    if (mirror_ctx != NULL) {
+        cairo_set_line_width(mirror_ctx, width);
     }
     return 0;
 }
@@ -327,27 +409,6 @@ static int hdmi_mod_is_running(lua_State *l) {
     lua_check_num_args(0);
     lua_pushboolean(l, running);
     return 1;
-}
-
-static int hdmi_mod_create_image_output(lua_State *l) {
-    lua_check_num_args(2);
-    _image_t *i = _image_check(l, 1);
-    const char *device = luaL_checkstring(l, 2);
-
-    if (i->surface != NULL) {
-        return create_framebuffer_output((cairo_surface_t*)i->surface, device);
-    }
-    return 0;
-}
-
-static int hdmi_mod_destroy_image_output(lua_State *l) {
-    lua_check_num_args(1);
-    _image_t *i = _image_check(l, 1);
-
-    if (i->surface != NULL) {
-        return destroy_framebuffer_output((cairo_surface_t*)i->surface);
-    }
-    return 0;
 }
 
 static int hdmi_mod_set_scale(lua_State *l) {
@@ -374,9 +435,16 @@ static luaL_Reg func[] = {
     {"start", hdmi_mod_start},
     {"stop", hdmi_mod_stop},
     {"is_running", hdmi_mod_is_running},
-    {"create_image_output", hdmi_mod_create_image_output},
-    {"destroy_image_output", hdmi_mod_destroy_image_output},
     {"set_scale", hdmi_mod_set_scale},
+    // Screen drawing wrapper functions
+    {"clear", hdmi_mod_clear},
+    {"move", hdmi_mod_move},
+    {"line", hdmi_mod_line},
+    {"rect", hdmi_mod_rect},
+    {"stroke", hdmi_mod_stroke},
+    {"fill", hdmi_mod_fill},
+    {"level", hdmi_mod_level},
+    {"line_width", hdmi_mod_line_width},
     {NULL, NULL}
 };
 
