@@ -393,6 +393,75 @@ static int hdmi_mod_line_width(lua_State *l) {
     return 0;
 }
 
+// Font and text functions
+static cairo_font_face_t* current_font_face = NULL;
+
+static int hdmi_mod_font_face(lua_State *l) {
+    lua_check_num_args(1);
+    int font_index = luaL_checkinteger(l, 1);
+
+    if (mirror_ctx != NULL) {
+        // Call the norns screen function to get the font
+        // This is a bit of a hack - we rely on norns having loaded the fonts
+        screen_font_face(font_index);
+
+        // For now, just use cairo's default font
+        // TODO: Load actual norns fonts if needed
+        cairo_select_font_face(mirror_ctx, "monospace",
+                             CAIRO_FONT_SLANT_NORMAL,
+                             CAIRO_FONT_WEIGHT_NORMAL);
+    }
+    return 0;
+}
+
+static int hdmi_mod_font_size(lua_State *l) {
+    lua_check_num_args(1);
+    double size = luaL_checknumber(l, 1);
+    if (mirror_ctx != NULL) {
+        cairo_set_font_size(mirror_ctx, size);
+    }
+    return 0;
+}
+
+static int hdmi_mod_text(lua_State *l) {
+    lua_check_num_args(1);
+    const char* text = luaL_checkstring(l, 1);
+    if (mirror_ctx != NULL) {
+        cairo_show_text(mirror_ctx, text);
+    }
+    return 0;
+}
+
+static int hdmi_mod_text_center(lua_State *l) {
+    lua_check_num_args(1);
+    const char* text = luaL_checkstring(l, 1);
+    if (mirror_ctx != NULL) {
+        cairo_text_extents_t extents;
+        cairo_text_extents(mirror_ctx, text, &extents);
+
+        double x, y;
+        cairo_get_current_point(mirror_ctx, &x, &y);
+        cairo_move_to(mirror_ctx, x - extents.width / 2.0, y);
+        cairo_show_text(mirror_ctx, text);
+    }
+    return 0;
+}
+
+static int hdmi_mod_text_right(lua_State *l) {
+    lua_check_num_args(1);
+    const char* text = luaL_checkstring(l, 1);
+    if (mirror_ctx != NULL) {
+        cairo_text_extents_t extents;
+        cairo_text_extents(mirror_ctx, text, &extents);
+
+        double x, y;
+        cairo_get_current_point(mirror_ctx, &x, &y);
+        cairo_move_to(mirror_ctx, x - extents.width, y);
+        cairo_show_text(mirror_ctx, text);
+    }
+    return 0;
+}
+
 static int hdmi_mod_start(lua_State *l) {
     lua_check_num_args(0);
     running = true;
@@ -445,6 +514,12 @@ static luaL_Reg func[] = {
     {"fill", hdmi_mod_fill},
     {"level", hdmi_mod_level},
     {"line_width", hdmi_mod_line_width},
+    // Font and text functions
+    {"font_face", hdmi_mod_font_face},
+    {"font_size", hdmi_mod_font_size},
+    {"text", hdmi_mod_text},
+    {"text_center", hdmi_mod_text_center},
+    {"text_right", hdmi_mod_text_right},
     {NULL, NULL}
 };
 
