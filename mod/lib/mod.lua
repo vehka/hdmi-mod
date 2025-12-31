@@ -16,6 +16,11 @@ mod.hook.register("system_post_startup", "hdmi", function()
     fill = screen.fill,
     level = screen.level,
     line_width = screen.line_width,
+    font_face = screen.font_face,
+    font_size = screen.font_size,
+    text = screen.text,
+    text_center = screen.text_center,
+    text_right = screen.text_right,
     update = screen.update
   }
 
@@ -58,6 +63,31 @@ mod.hook.register("system_post_startup", "hdmi", function()
   screen.line_width = function(width)
     original_screen.line_width(width)
     hdmi_mod.line_width(width)
+  end
+
+  screen.font_face = function(index)
+    original_screen.font_face(index)
+    hdmi_mod.font_face(index)
+  end
+
+  screen.font_size = function(size)
+    original_screen.font_size(size)
+    hdmi_mod.font_size(size)
+  end
+
+  screen.text = function(str)
+    original_screen.text(str)
+    hdmi_mod.text(str)
+  end
+
+  screen.text_center = function(str)
+    original_screen.text_center(str)
+    hdmi_mod.text_center(str)
+  end
+
+  screen.text_right = function(str)
+    original_screen.text_right(str)
+    hdmi_mod.text_right(str)
   end
 
   -- Update function: update norns screen, then mirror to HDMI
