@@ -22,6 +22,11 @@ extern "C" {
 #include <cairo.h>
 // local copies of private weaver types/methods
 #include <weaver_image.h>
+
+// Access matron's global cairo context directly
+// This is defined in screen.c as: static cairo_t *cr_primary;
+// But it may be exported as a symbol we can access
+extern cairo_t *cr_primary;
 }
 
 struct FramebufferInfo {
@@ -196,12 +201,13 @@ int initialize_hdmi() {
         initialized = true;
 
         // create the default framebuffer output
-        cairo_t* ctx = (cairo_t*)screen_context_get_current();
-        if (ctx == NULL) {
+        // Access the primary cairo context directly
+        if (cr_primary == NULL) {
             MSG("failed to get screen context");
             failed = true;
             return 0;
         }
+        cairo_t* ctx = cr_primary;
 
         cairo_surface_t* surface = cairo_get_target(ctx);
 
@@ -295,11 +301,11 @@ static int hdmi_mod_cleanup(lua_State *l) {
 static int hdmi_mod_update(lua_State *l) {
     lua_check_num_args(0);
     if (running) {
-        cairo_t* ctx = (cairo_t*)screen_context_get_current();
-        if (ctx == NULL) {
+        // Access the primary cairo context directly
+        if (cr_primary == NULL) {
             return 0;
         }
-        cairo_surface_t* surface = cairo_get_target(ctx);
+        cairo_surface_t* surface = cairo_get_target(cr_primary);
         return send_surface_to_framebuffer(surface);
     }
     return 0;
