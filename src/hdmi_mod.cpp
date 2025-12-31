@@ -14,13 +14,9 @@
 #include <lua.h>
 #include <lualib.h>
 // Simple replacement for lua_check_num_args from lua_eval.h
-
 #define lua_check_num_args(n) \
-
     if (lua_gettop(l) != (n)) { \
-
         return luaL_error(l, "wrong number of arguments: expected %d, got %d", (n), lua_gettop(l)); \
-
     }
 extern "C" {
 // matron
@@ -203,7 +199,7 @@ int initialize_hdmi() {
         initialized = true;
 
         // create the default framebuffer output
-        cairo_t* ctx = (cairo_t*)screen_context_get_current();
+        cairo_t* ctx = (cairo_t*)screen_context_get_primary();
         if (ctx == NULL) {
             MSG("failed to get screen context");
             failed = true;
@@ -302,7 +298,7 @@ static int hdmi_mod_cleanup(lua_State *l) {
 static int hdmi_mod_update(lua_State *l) {
     lua_check_num_args(0);
     if (running) {
-        cairo_t* ctx = (cairo_t*)screen_context_get_current();
+        cairo_t* ctx = (cairo_t*)screen_context_get_primary();
         if (ctx == NULL) {
             return 0;
         }
