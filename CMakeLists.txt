@@ -37,7 +37,7 @@ target_compile_options(lua-extension PRIVATE -O3)
 
 add_custom_target(copy-mod ALL COMMAND
     ${CMAKE_COMMAND} -E copy_directory
-        ${CMAKE_CURRENT_SOURCE_DIR}/mod-hdmi
+        ${CMAKE_CURRENT_SOURCE_DIR}/mod
         ${MOD_OUTPUT_PATH}
 )
 

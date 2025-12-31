@@ -13,10 +13,17 @@
 #include <lauxlib.h>
 #include <lua.h>
 #include <lualib.h>
+// Simple replacement for lua_check_num_args from lua_eval.h
 
+#define lua_check_num_args(n) \
+
+    if (lua_gettop(l) != (n)) { \
+
+        return luaL_error(l, "wrong number of arguments: expected %d, got %d", (n), lua_gettop(l)); \
+
+    }
 extern "C" {
 // matron
-#include "lua_eval.h"
 #include "hardware/screen.h"
 // cairo
 #include <cairo.h>

@@ -2,8 +2,17 @@
 
 # Build script for hdmi-mod
 
-mkdir -p build-hdmi && cd build-hdmi
-cmake -C ../CMakeLists.txt ..
+set -e  # Exit on error
+
+# Build
+
+mkdir -p build-hdmi
+cd build-hdmi
+echo "Running cmake..."
+
+cmake ..
+
+echo "Building..."
 make install-dust install-zip
 
 echo ""
