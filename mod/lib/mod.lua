@@ -2,11 +2,40 @@ local mod = require 'core/mods'
 
 local this_name = mod.this_name
 
+-- Settings file path
+local settings_path = _path.data .. "hdmi_mod_settings.lua"
+
 -- Console mode state
 local hdmi_output_mode = "norns_screen"  -- or "console"
 local keyboard_target = "norns"           -- or "console"
 local original_keyboard_code = nil
 local original_keyboard_char = nil
+
+-- Settings persistence
+local function save_settings()
+  local f = io.open(settings_path, "w")
+  if not f then return end
+  io.output(f)
+  io.write("return {\n")
+  io.write("  hdmi_output_mode = '" .. hdmi_output_mode .. "',\n")
+  io.write("  keyboard_target = '" .. keyboard_target .. "',\n")
+  io.write("}\n")
+  io.close(f)
+  print("hdmi-mod: settings saved")
+end
+
+local function load_settings()
+  local f = io.open(settings_path, "r")
+  if f then
+    io.close(f)
+    local settings = dofile(settings_path)
+    hdmi_output_mode = settings.hdmi_output_mode or "norns_screen"
+    keyboard_target = settings.keyboard_target or "norns"
+    print("hdmi-mod: settings loaded")
+    return settings
+  end
+  return nil
+end
 
 -- Forward declare console mode functions (defined after hook)
 local switch_hdmi_mode
@@ -15,6 +44,9 @@ local switch_keyboard_mode
 mod.hook.register("system_post_startup", "hdmi", function()
   package.cpath = package.cpath .. ";" .. paths.code .. this_name .. "/lib/?.so"
   hdmi_mod = require 'hdmi_mod'
+
+  -- Load saved settings
+  load_settings()
 
   -- Save original screen functions
   local original_screen = {
@@ -142,16 +174,22 @@ mod.hook.register("system_post_startup", "hdmi", function()
     if mode == "console" then
       -- Stop norns screen mirroring
       hdmi_mod.stop()
-      -- Map console 1 (tty1) to framebuffer 1 (HDMI)
-      local success = hdmi_mod.map_console_to_fb(1, 1)
+      -- Clear framebuffer
+      hdmi_mod.clear_framebuffer()
+      -- Map console 2 (tty2) to framebuffer 1 (HDMI)
+      local success = hdmi_mod.map_console_to_fb(2, 1)
       if success then
-        print("hdmi-mod: HDMI switched to console mode")
+        -- Switch to tty2 to activate console on HDMI
+        os.execute("chvt 2")
+        print("hdmi-mod: HDMI switched to console mode (tty2)")
       else
         print("hdmi-mod: Failed to map console to HDMI")
       end
     else  -- norns_screen
+      -- Switch back to tty1
+      os.execute("chvt 1")
       -- Map console back to fb0 (norns OLED)
-      hdmi_mod.map_console_to_fb(1, 0)
+      hdmi_mod.map_console_to_fb(2, 0)
       -- Resume norns screen mirroring
       hdmi_mod.start()
       print("hdmi-mod: HDMI switched to norns screen mode")
@@ -160,12 +198,12 @@ mod.hook.register("system_post_startup", "hdmi", function()
 
   switch_keyboard_mode = function(mode)
     if mode == "console" then
-      -- Open TTY for injection
-      local success = hdmi_mod.open_tty("/dev/tty1")
+      -- Open TTY for injection (use tty2)
+      local success = hdmi_mod.open_tty("/dev/tty2")
       if success then
-        print("hdmi-mod: Keyboard routed to console")
+        print("hdmi-mod: Keyboard routed to console (tty2)")
       else
-        print("hdmi-mod: Failed to open /dev/tty1")
+        print("hdmi-mod: Failed to open /dev/tty2")
       end
     else  -- norns
       -- Close TTY
@@ -278,7 +316,14 @@ local menu_ui = {
 }
 
 menu_ui.init = function()
-  -- Called when menu is opened
+  -- Update menu values from current settings
+  for _, setting in ipairs(menu_ui.settings) do
+    if setting.id == "hdmi_output" then
+      setting.value = (hdmi_output_mode == "norns_screen") and 1 or 2
+    elseif setting.id == "keyboard_target" then
+      setting.value = (keyboard_target == "norns") and 1 or 2
+    end
+  end
 end
 
 menu_ui.deinit = function()
@@ -310,9 +355,11 @@ menu_ui.enc = function(n, delta)
       if setting.id == "hdmi_output" then
         hdmi_output_mode = (setting.value == 1) and "norns_screen" or "console"
         switch_hdmi_mode(hdmi_output_mode)
+        save_settings()
       elseif setting.id == "keyboard_target" then
         keyboard_target = (setting.value == 1) and "norns" or "console"
         switch_keyboard_mode(keyboard_target)
+        save_settings()
       end
     end
   end

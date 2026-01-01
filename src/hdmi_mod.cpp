@@ -749,6 +749,20 @@ static int hdmi_mod_close_tty(lua_State *l) {
     return 0;
 }
 
+static int hdmi_mod_clear_framebuffer(lua_State *l) {
+    lua_check_num_args(0);
+    if (hdmi_fb == NULL || hdmi_fb->mapped_mem == NULL) {
+        lua_pushboolean(l, false);
+        return 1;
+    }
+
+    // Clear framebuffer to black
+    memset(hdmi_fb->mapped_mem, 0, hdmi_fb->height * hdmi_fb->line_length);
+    MSG("Framebuffer cleared");
+    lua_pushboolean(l, true);
+    return 1;
+}
+
 //
 // module definition
 //
@@ -770,6 +784,7 @@ static luaL_Reg func[] = {
     {"open_tty", hdmi_mod_open_tty},
     {"inject_tty_char", hdmi_mod_inject_tty_char},
     {"close_tty", hdmi_mod_close_tty},
+    {"clear_framebuffer", hdmi_mod_clear_framebuffer},
     // Screen drawing wrapper functions
     {"clear", hdmi_mod_clear},
     {"move", hdmi_mod_move},
