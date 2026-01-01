@@ -25,11 +25,13 @@ This approach is more compatible across norns versions but requires implementing
 - `clear()` - Clear screen
 - `move(x, y)` - Move drawing position
 - `line(x, y)` - Draw line to point
+- `line_rel(x, y)` - Draw line relative to current position
 - `rect(x, y, w, h)` - Draw rectangle
 - `stroke()` - Stroke current path
 - `fill()` - Fill current path
 - `level(value)` - Set brightness (0-15)
 - `line_width(w)` - Set line width
+- `aa(state)` - Enable/disable anti-aliasing
 
 #### Text & Fonts
 - `text(str)` - Draw left-aligned text
@@ -49,14 +51,12 @@ This approach is more compatible across norns versions but requires implementing
 ### ⏳ Drawing Functions (TODO)
 
 #### Line/Path Styling
-- `aa(state)` - Enable/disable anti-aliasing
 - `line_cap(style)` - Set line cap style ("butt", "round", "square")
 - `line_join(style)` - Set line join style ("miter", "round", "bevel")
 - `miter_limit(limit)` - Set miter limit
 
 #### Relative Movement
 - `move_rel(x, y)` - Move relative to current position
-- `line_rel(x, y)` - Draw line relative to current position
 
 #### Shapes
 - `arc(x, y, r, angle1, angle2)` - Draw arc

@@ -11,6 +11,8 @@ mod.hook.register("system_post_startup", "hdmi", function()
     clear = screen.clear,
     move = screen.move,
     line = screen.line,
+    line_rel = screen.line_rel,
+    aa = screen.aa,
     rect = screen.rect,
     stroke = screen.stroke,
     fill = screen.fill,
@@ -38,6 +40,16 @@ mod.hook.register("system_post_startup", "hdmi", function()
   screen.line = function(x, y)
     original_screen.line(x, y)
     hdmi_mod.line(x, y)
+  end
+
+  screen.line_rel = function(x, y)
+    original_screen.line_rel(x, y)
+    hdmi_mod.line_rel(x, y)
+  end
+
+  screen.aa = function(state)
+    original_screen.aa(state)
+    hdmi_mod.aa(state)
   end
 
   screen.rect = function(x, y, w, h)

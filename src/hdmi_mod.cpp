@@ -497,6 +497,25 @@ static int hdmi_mod_line(lua_State *l) {
     return 0;
 }
 
+static int hdmi_mod_line_rel(lua_State *l) {
+    lua_check_num_args(2);
+    double x = luaL_checknumber(l, 1);
+    double y = luaL_checknumber(l, 2);
+    if (mirror_ctx != NULL) {
+        cairo_rel_line_to(mirror_ctx, x, y);
+    }
+    return 0;
+}
+
+static int hdmi_mod_aa(lua_State *l) {
+    lua_check_num_args(1);
+    int state = luaL_checkinteger(l, 1);
+    if (mirror_ctx != NULL) {
+        cairo_set_antialias(mirror_ctx, state ? CAIRO_ANTIALIAS_DEFAULT : CAIRO_ANTIALIAS_NONE);
+    }
+    return 0;
+}
+
 static int hdmi_mod_rect(lua_State *l) {
     lua_check_num_args(4);
     double x = luaL_checknumber(l, 1);
@@ -658,6 +677,8 @@ static luaL_Reg func[] = {
     {"clear", hdmi_mod_clear},
     {"move", hdmi_mod_move},
     {"line", hdmi_mod_line},
+    {"line_rel", hdmi_mod_line_rel},
+    {"aa", hdmi_mod_aa},
     {"rect", hdmi_mod_rect},
     {"stroke", hdmi_mod_stroke},
     {"fill", hdmi_mod_fill},
