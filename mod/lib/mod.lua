@@ -213,8 +213,21 @@ mod.hook.register("system_post_startup", "hdmi", function()
 
   -- Map norns keyboard layout to console keymap
   local function apply_console_keymap()
-    -- Get current norns keyboard layout - try different methods
-    local norns_layout = keyboard.layout or keyboard.active_layout or "US"
+    -- Get current norns keyboard layout from system state
+    local norns_layout = "US"
+
+    -- Try to read from system state file
+    local state_file = _path.data .. "system.state"
+    local f = io.open(state_file, "r")
+    if f then
+      local content = f:read("*all")
+      f:close()
+      -- Parse the kbd_layout from the state file
+      local layout_match = content:match('kbd_layout%s*=%s*"([^"]+)"')
+      if layout_match then
+        norns_layout = layout_match
+      end
+    end
 
     -- Debug: print what layout we detected
     print("hdmi-mod: Detected norns keyboard layout: " .. tostring(norns_layout))
