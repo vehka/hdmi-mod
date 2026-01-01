@@ -8,6 +8,10 @@ local keyboard_target = "norns"           -- or "console"
 local original_keyboard_code = nil
 local original_keyboard_char = nil
 
+-- Forward declare console mode functions (defined after hook)
+local switch_hdmi_mode
+local switch_keyboard_mode
+
 mod.hook.register("system_post_startup", "hdmi", function()
   package.cpath = package.cpath .. ";" .. paths.code .. this_name .. "/lib/?.so"
   hdmi_mod = require 'hdmi_mod'
@@ -133,8 +137,8 @@ mod.hook.register("system_post_startup", "hdmi", function()
     screen.update()
   end
 
-  -- Console mode functions
-  local function switch_hdmi_mode(mode)
+  -- Define console mode functions
+  switch_hdmi_mode = function(mode)
     if mode == "console" then
       -- Stop norns screen mirroring
       hdmi_mod.stop()
@@ -154,7 +158,7 @@ mod.hook.register("system_post_startup", "hdmi", function()
     end
   end
 
-  local function switch_keyboard_mode(mode)
+  switch_keyboard_mode = function(mode)
     if mode == "console" then
       -- Open TTY for injection
       local success = hdmi_mod.open_tty("/dev/tty1")
@@ -260,34 +264,94 @@ mod.hook.register("system_post_startup", "hdmi", function()
     end
   end
 
-  -- Add mod parameters
-  params:add_group("HDMI", 2)
-
-  params:add{
-    type = "option",
-    id = "hdmi_output_mode",
-    name = "HDMI Output",
-    options = {"norns screen", "console"},
-    default = 1,
-    action = function(value)
-      hdmi_output_mode = (value == 1) and "norns_screen" or "console"
-      switch_hdmi_mode(hdmi_output_mode)
-    end
-  }
-
-  params:add{
-    type = "option",
-    id = "hdmi_keyboard_target",
-    name = "Keyboard Target",
-    options = {"norns", "console"},
-    default = 1,
-    action = function(value)
-      keyboard_target = (value == 1) and "norns" or "console"
-      switch_keyboard_mode(keyboard_target)
-    end
-  }
-
 end)
+
+-- Menu UI object
+local menu_ui = {
+  selected = 1,
+  settings = {
+    {id = "hdmi_output", name = "HDMI Output", type = "option",
+     options = {"norns screen", "console"}, value = 1},
+    {id = "keyboard_target", name = "Keyboard Target", type = "option",
+     options = {"norns", "console"}, value = 1},
+  }
+}
+
+menu_ui.init = function()
+  -- Called when menu is opened
+end
+
+menu_ui.deinit = function()
+  -- Called when menu is closed
+end
+
+menu_ui.key = function(n, z)
+  if z == 1 then  -- Key press
+    if n == 2 then
+      -- K2: Exit menu
+      mod.menu.exit()
+    elseif n == 3 then
+      -- K3: Toggle selected setting (not used, E3 handles this)
+    end
+  end
+end
+
+menu_ui.enc = function(n, delta)
+  if n == 2 then
+    -- E2: Navigate settings
+    menu_ui.selected = util.clamp(menu_ui.selected + delta, 1, #menu_ui.settings)
+  elseif n == 3 then
+    -- E3: Change setting value
+    local setting = menu_ui.settings[menu_ui.selected]
+    if setting.type == "option" then
+      setting.value = util.clamp(setting.value + delta, 1, #setting.options)
+
+      -- Apply setting change
+      if setting.id == "hdmi_output" then
+        hdmi_output_mode = (setting.value == 1) and "norns_screen" or "console"
+        switch_hdmi_mode(hdmi_output_mode)
+      elseif setting.id == "keyboard_target" then
+        keyboard_target = (setting.value == 1) and "norns" or "console"
+        switch_keyboard_mode(keyboard_target)
+      end
+    end
+  end
+  mod.menu.redraw()
+end
+
+menu_ui.redraw = function()
+  screen.clear()
+
+  -- Title
+  screen.level(15)
+  screen.move(0, 10)
+  screen.text("HDMI Settings")
+
+  -- Draw settings
+  local y = 25
+  for i, setting in ipairs(menu_ui.settings) do
+    local is_selected = (i == menu_ui.selected)
+    screen.level(is_selected and 15 or 4)
+
+    -- Setting name
+    screen.move(0, y)
+    screen.text(setting.name)
+
+    -- Setting value
+    if setting.type == "option" then
+      local value_text = setting.options[setting.value]
+      screen.move(127, y)
+      screen.text_right(value_text)
+    end
+
+    y = y + 12
+  end
+
+  screen.update()
+end
+
+-- Register menu UI
+mod.menu.register(mod.this_name, menu_ui)
 
 mod.hook.register("system_pre_shutdown", "hdmi", function()
   hdmi_mod.cleanup()
