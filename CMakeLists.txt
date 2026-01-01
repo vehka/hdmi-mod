@@ -16,6 +16,8 @@ set(CMAKE_SKIP_BUILD_RPATH FALSE)
 # Build the hdmi_mod C++ extension
 include(FindPkgConfig)
 pkg_check_modules(LIBLUA REQUIRED lua-5.3)
+pkg_check_modules(FREETYPE REQUIRED freetype2)
+pkg_check_modules(CAIRO REQUIRED cairo)
 
 set(NORNS_SOURCE_PATH "${CMAKE_SOURCE_DIR}/dep/norns")
 
@@ -29,8 +31,14 @@ set_target_properties(lua-extension PROPERTIES
 target_include_directories(lua-extension PUBLIC
   "${NORNS_SOURCE_PATH}/matron/src"
   "${CMAKE_CURRENT_SOURCE_DIR}/src"
-  "/usr/include/cairo"
+  ${CAIRO_INCLUDE_DIRS}
+  ${FREETYPE_INCLUDE_DIRS}
   ${LIBLUA_INCLUDE_DIRS}
+)
+
+target_link_libraries(lua-extension
+  ${CAIRO_LIBRARIES}
+  ${FREETYPE_LIBRARIES}
 )
 
 target_compile_options(lua-extension PRIVATE -O3)

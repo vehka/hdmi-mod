@@ -20,6 +20,10 @@ extern "C" {
 #include "hardware/screen.h"
 // cairo
 #include <cairo.h>
+#include <cairo-ft.h>
+// freetype
+#include <ft2build.h>
+#include FT_FREETYPE_H
 // local copies of private weaver types/methods
 #include <weaver_image.h>
 }
@@ -40,6 +44,14 @@ static cairo_t* mirror_ctx = NULL;
 
 // Single framebuffer info for HDMI output
 static FramebufferInfo* hdmi_fb = NULL;
+
+// Font management
+#define NUM_FONTS 69
+static FT_Library ft_library;
+static FT_Face ft_faces[NUM_FONTS];
+static cairo_font_face_t* font_faces[NUM_FONTS];
+static const char* font_paths[NUM_FONTS];
+static bool fonts_initialized = false;
 
 static bool running = false;
 static bool initialized = false;
@@ -188,9 +200,145 @@ void close_hdmi_framebuffer() {
     MSG("framebuffer output closed");
 }
 
+void init_fonts() {
+    if (fonts_initialized) {
+        return;
+    }
+
+    // Initialize FreeType
+    FT_Error status = FT_Init_FreeType(&ft_library);
+    if (status != 0) {
+        MSG("ERROR: FreeType init failed");
+        return;
+    }
+
+    // Initialize font paths (matching norns font indices)
+    int idx = 0;
+    font_paths[idx++] = "norns.ttf";               // 1
+    font_paths[idx++] = "liquid.ttf";              // 2 (ALEPH)
+    font_paths[idx++] = "Roboto-Thin.ttf";         // 3
+    font_paths[idx++] = "Roboto-Light.ttf";        // 4
+    font_paths[idx++] = "Roboto-Regular.ttf";      // 5
+    font_paths[idx++] = "Roboto-Medium.ttf";       // 6
+    font_paths[idx++] = "Roboto-Bold.ttf";         // 7
+    font_paths[idx++] = "Roboto-Black.ttf";        // 8
+    font_paths[idx++] = "Roboto-ThinItalic.ttf";   // 9
+    font_paths[idx++] = "Roboto-LightItalic.ttf";  // 10
+    font_paths[idx++] = "Roboto-Italic.ttf";       // 11
+    font_paths[idx++] = "Roboto-MediumItalic.ttf"; // 12
+    font_paths[idx++] = "Roboto-BoldItalic.ttf";   // 13
+    font_paths[idx++] = "Roboto-BlackItalic.ttf";  // 14
+    font_paths[idx++] = "VeraBd.ttf";              // 15
+    font_paths[idx++] = "VeraBI.ttf";              // 16
+    font_paths[idx++] = "VeraIt.ttf";              // 17
+    font_paths[idx++] = "VeraMoBd.ttf";            // 18
+    font_paths[idx++] = "VeraMoBI.ttf";            // 19
+    font_paths[idx++] = "VeraMoIt.ttf";            // 20
+    font_paths[idx++] = "VeraMono.ttf";            // 21
+    font_paths[idx++] = "VeraSeBd.ttf";            // 22
+    font_paths[idx++] = "VeraSe.ttf";              // 23
+    font_paths[idx++] = "Vera.ttf";                // 24
+    // Bitmap fonts
+    font_paths[idx++] = "bmp/tom-thumb.bdf";       // 25
+    font_paths[idx++] = "bmp/creep.bdf";           // 26
+    font_paths[idx++] = "bmp/ctrld-fixed-10b.bdf"; // 27
+    font_paths[idx++] = "bmp/ctrld-fixed-10r.bdf"; // 28
+    font_paths[idx++] = "bmp/ctrld-fixed-13b.bdf"; // 29
+    font_paths[idx++] = "bmp/ctrld-fixed-13b-i.bdf"; // 30
+    font_paths[idx++] = "bmp/ctrld-fixed-13r.bdf"; // 31
+    font_paths[idx++] = "bmp/ctrld-fixed-13r-i.bdf"; // 32
+    font_paths[idx++] = "bmp/ctrld-fixed-16b.bdf"; // 33
+    font_paths[idx++] = "bmp/ctrld-fixed-16b-i.bdf"; // 34
+    font_paths[idx++] = "bmp/ctrld-fixed-16r.bdf"; // 35
+    font_paths[idx++] = "bmp/ctrld-fixed-16r-i.bdf"; // 36
+    font_paths[idx++] = "bmp/scientifica-11.bdf";  // 37
+    font_paths[idx++] = "bmp/scientificaBold-11.bdf"; // 38
+    font_paths[idx++] = "bmp/scientificaItalic-11.bdf"; // 39
+    font_paths[idx++] = "bmp/ter-u12b.bdf";        // 40
+    font_paths[idx++] = "bmp/ter-u12n.bdf";        // 41
+    font_paths[idx++] = "bmp/ter-u14b.bdf";        // 42
+    font_paths[idx++] = "bmp/ter-u14n.bdf";        // 43
+    font_paths[idx++] = "bmp/ter-u14v.bdf";        // 44
+    font_paths[idx++] = "bmp/ter-u16b.bdf";        // 45
+    font_paths[idx++] = "bmp/ter-u16n.bdf";        // 46
+    font_paths[idx++] = "bmp/ter-u16v.bdf";        // 47
+    font_paths[idx++] = "bmp/ter-u18b.bdf";        // 48
+    font_paths[idx++] = "bmp/ter-u18n.bdf";        // 49
+    font_paths[idx++] = "bmp/ter-u20b.bdf";        // 50
+    font_paths[idx++] = "bmp/ter-u20n.bdf";        // 51
+    font_paths[idx++] = "bmp/ter-u22b.bdf";        // 52
+    font_paths[idx++] = "bmp/ter-u22n.bdf";        // 53
+    font_paths[idx++] = "bmp/ter-u24b.bdf";        // 54
+    font_paths[idx++] = "bmp/ter-u24n.bdf";        // 55
+    font_paths[idx++] = "bmp/ter-u28b.bdf";        // 56
+    font_paths[idx++] = "bmp/ter-u28n.bdf";        // 57
+    font_paths[idx++] = "bmp/ter-u32b.bdf";        // 58
+    font_paths[idx++] = "bmp/ter-u32n.bdf";        // 59
+    font_paths[idx++] = "bmp/unscii-16-full.pcf";  // 60
+    font_paths[idx++] = "bmp/unscii-16.pcf";       // 61
+    font_paths[idx++] = "bmp/unscii-8-alt.pcf";    // 62
+    font_paths[idx++] = "bmp/unscii-8-fantasy.pcf"; // 63
+    font_paths[idx++] = "bmp/unscii-8-mcr.pcf";    // 64
+    font_paths[idx++] = "bmp/unscii-8.pcf";        // 65
+    font_paths[idx++] = "bmp/unscii-8-tall.pcf";   // 66
+    font_paths[idx++] = "bmp/unscii-8-thin.pcf";   // 67
+    font_paths[idx++] = "Particle.ttf";            // 68
+    font_paths[idx++] = "norns.ttf";               // 69 (alias for 04B_03)
+
+    // Load all fonts
+    char full_path[512];
+    const char* home = getenv("HOME");
+    if (!home) home = "/home/we";
+
+    for (int i = 0; i < NUM_FONTS; i++) {
+        snprintf(full_path, sizeof(full_path), "%s/norns/resources/%s", home, font_paths[i]);
+
+        status = FT_New_Face(ft_library, full_path, 0, &ft_faces[i]);
+        if (status != 0) {
+            MSG("Warning: couldn't load font " << i+1 << ": " << font_paths[i]);
+            font_faces[i] = NULL;
+        } else {
+            font_faces[i] = cairo_ft_font_face_create_for_ft_face(ft_faces[i], 0);
+            if (!font_faces[i]) {
+                MSG("Warning: couldn't create cairo font face for " << font_paths[i]);
+            }
+        }
+    }
+
+    MSG("Loaded " << NUM_FONTS << " fonts");
+    fonts_initialized = true;
+}
+
+void cleanup_fonts() {
+    if (!fonts_initialized) {
+        return;
+    }
+
+    for (int i = 0; i < NUM_FONTS; i++) {
+        if (font_faces[i]) {
+            cairo_font_face_destroy(font_faces[i]);
+            font_faces[i] = NULL;
+        }
+        if (ft_faces[i]) {
+            FT_Done_Face(ft_faces[i]);
+            ft_faces[i] = NULL;
+        }
+    }
+
+    if (ft_library) {
+        FT_Done_FreeType(ft_library);
+        ft_library = NULL;
+    }
+
+    fonts_initialized = false;
+}
+
 int initialize_hdmi() {
     if (!initialized && !failed) {
         MSG("HDMI output service initializing");
+
+        // Initialize fonts
+        init_fonts();
 
         // Create our own cairo surface for mirroring (128x64, ARGB32 like norns)
         mirror_surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, 128, 64);
@@ -257,6 +405,9 @@ int cleanup_hdmi() {
 
         // Close framebuffer
         close_hdmi_framebuffer();
+
+        // Cleanup fonts
+        cleanup_fonts();
 
         MSG("HDMI output service stopped");
     }
@@ -394,22 +545,20 @@ static int hdmi_mod_line_width(lua_State *l) {
 }
 
 // Font and text functions
-static cairo_font_face_t* current_font_face = NULL;
 
 static int hdmi_mod_font_face(lua_State *l) {
     lua_check_num_args(1);
     int font_index = luaL_checkinteger(l, 1);
 
-    if (mirror_ctx != NULL) {
-        // Call the norns screen function to get the font
-        // This is a bit of a hack - we rely on norns having loaded the fonts
-        screen_font_face(font_index);
+    if (mirror_ctx != NULL && fonts_initialized) {
+        // Lua uses 1-based indexing, C uses 0-based
+        int idx = font_index - 1;
 
-        // For now, just use cairo's default font
-        // TODO: Load actual norns fonts if needed
-        cairo_select_font_face(mirror_ctx, "monospace",
-                             CAIRO_FONT_SLANT_NORMAL,
-                             CAIRO_FONT_WEIGHT_NORMAL);
+        if (idx >= 0 && idx < NUM_FONTS && font_faces[idx] != NULL) {
+            cairo_set_font_face(mirror_ctx, font_faces[idx]);
+        } else {
+            MSG("Warning: invalid font index " << font_index);
+        }
     }
     return 0;
 }
