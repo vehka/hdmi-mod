@@ -179,6 +179,12 @@ mod.hook.register("system_post_startup", "hdmi", function()
       -- Map console 2 (tty2) to framebuffer 1 (HDMI)
       local success = hdmi_mod.map_console_to_fb(2, 1)
       if success then
+        -- Write test message to tty2 to verify it's working
+        os.execute("echo '\n\nHDMI Console Active (tty2)\nLogin: we\n' > /dev/tty2")
+
+        -- Try to start getty on tty2 if not already running
+        os.execute("(ps aux | grep -q '[a]getty.*tty2') || openvt -c 2 -s -w -- login -f we &")
+
         -- Switch to tty2 to activate console on HDMI
         os.execute("chvt 2")
         print("hdmi-mod: HDMI switched to console mode (tty2)")
