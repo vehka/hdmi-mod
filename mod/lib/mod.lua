@@ -213,8 +213,11 @@ mod.hook.register("system_post_startup", "hdmi", function()
 
   -- Map norns keyboard layout to console keymap
   local function apply_console_keymap()
-    -- Get current norns keyboard layout
-    local norns_layout = keyboard.layout or "US"
+    -- Get current norns keyboard layout - try different methods
+    local norns_layout = keyboard.layout or keyboard.active_layout or "US"
+
+    -- Debug: print what layout we detected
+    print("hdmi-mod: Detected norns keyboard layout: " .. tostring(norns_layout))
 
     -- Map norns layout names to console keymap names
     local keymap_mapping = {
@@ -228,7 +231,7 @@ mod.hook.register("system_post_startup", "hdmi", function()
       SE = "se",
       NO = "no",
       DK = "dk",
-      FI = "fi",
+      FI = "fi-latin1",  -- fi-latin1 is more common on Linux
       NL = "nl",
       BE = "be",
       CH = "ch",
@@ -240,11 +243,21 @@ mod.hook.register("system_post_startup", "hdmi", function()
       KR = "kr",
     }
 
-    local console_keymap = keymap_mapping[norns_layout] or "us"
+    local console_keymap = keymap_mapping[norns_layout:upper()] or "us"
 
-    -- Load the keymap on tty2
-    os.execute("loadkeys " .. console_keymap .. " < /dev/tty2 > /dev/tty2 2>&1")
-    print("hdmi-mod: Console keymap set to " .. console_keymap)
+    print("hdmi-mod: Applying console keymap: " .. console_keymap)
+
+    -- Load the keymap - use proper syntax for specific tty
+    local cmd = "loadkeys " .. console_keymap .. " 2>&1"
+    local handle = io.popen(cmd)
+    local result = handle:read("*a")
+    handle:close()
+
+    if result and result ~= "" then
+      print("hdmi-mod: loadkeys output: " .. result)
+    end
+
+    print("hdmi-mod: Console keymap applied")
   end
 
   switch_keyboard_mode = function(mode)
