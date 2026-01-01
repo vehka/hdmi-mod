@@ -166,6 +166,15 @@ mod.hook.register("system_post_startup", "hdmi", function()
     hdmi_mod.init()
     hdmi_mod.start()
     screen.update = screen.update_default
+
+    -- Apply saved settings after initialization
+    if hdmi_output_mode == "console" then
+      switch_hdmi_mode("console")
+    end
+    if keyboard_target == "console" then
+      switch_keyboard_mode("console")
+    end
+
     screen.update()
   end
 
@@ -202,11 +211,49 @@ mod.hook.register("system_post_startup", "hdmi", function()
     end
   end
 
+  -- Map norns keyboard layout to console keymap
+  local function apply_console_keymap()
+    -- Get current norns keyboard layout
+    local norns_layout = keyboard.layout or "US"
+
+    -- Map norns layout names to console keymap names
+    local keymap_mapping = {
+      US = "us",
+      FR = "fr",
+      DE = "de",
+      UK = "uk",
+      ES = "es",
+      IT = "it",
+      PT = "pt",
+      SE = "se",
+      NO = "no",
+      DK = "dk",
+      FI = "fi",
+      NL = "nl",
+      BE = "be",
+      CH = "ch",
+      AT = "de",
+      PL = "pl",
+      CZ = "cz",
+      RU = "ru",
+      JP = "jp106",
+      KR = "kr",
+    }
+
+    local console_keymap = keymap_mapping[norns_layout] or "us"
+
+    -- Load the keymap on tty2
+    os.execute("loadkeys " .. console_keymap .. " < /dev/tty2 > /dev/tty2 2>&1")
+    print("hdmi-mod: Console keymap set to " .. console_keymap)
+  end
+
   switch_keyboard_mode = function(mode)
     if mode == "console" then
       -- Open TTY for injection (use tty2)
       local success = hdmi_mod.open_tty("/dev/tty2")
       if success then
+        -- Apply norns keyboard layout to console
+        apply_console_keymap()
         print("hdmi-mod: Keyboard routed to console (tty2)")
       else
         print("hdmi-mod: Failed to open /dev/tty2")
