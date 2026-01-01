@@ -662,6 +662,94 @@ static int hdmi_mod_set_scale(lua_State *l) {
 }
 
 //
+// Console mode functions
+//
+
+static int hdmi_mod_map_console_to_fb(lua_State *l) {
+    lua_check_num_args(2);
+    int console = luaL_checkinteger(l, 1);  // e.g., 1 for tty1
+    int fb_idx = luaL_checkinteger(l, 2);   // e.g., 1 for fb1, 0 for fb0
+
+    if (hdmi_fb == NULL || hdmi_fb->fd < 0) {
+        MSG("framebuffer not initialized");
+        lua_pushboolean(l, false);
+        return 1;
+    }
+
+    struct fb_con2fbmap con2fb;
+    con2fb.console = console;
+    con2fb.framebuffer = fb_idx;
+
+    if (ioctl(hdmi_fb->fd, FBIOPUT_CON2FBMAP, &con2fb) < 0) {
+        MSG("failed to map console " << console << " to fb" << fb_idx << ": " << strerror(errno));
+        lua_pushboolean(l, false);
+        return 1;
+    }
+
+    MSG("mapped console " << console << " to fb" << fb_idx);
+    lua_pushboolean(l, true);
+    return 1;
+}
+
+// TTY file descriptor for keyboard injection
+static int tty_fd = -1;
+
+static int hdmi_mod_open_tty(lua_State *l) {
+    lua_check_num_args(1);
+    const char* tty_path = luaL_checkstring(l, 1);
+
+    // Close existing TTY if open
+    if (tty_fd >= 0) {
+        close(tty_fd);
+        tty_fd = -1;
+    }
+
+    tty_fd = open(tty_path, O_RDWR | O_NOCTTY);
+    if (tty_fd < 0) {
+        MSG("failed to open TTY " << tty_path << ": " << strerror(errno));
+        lua_pushboolean(l, false);
+        return 1;
+    }
+
+    MSG("TTY opened: " << tty_path);
+    lua_pushboolean(l, true);
+    return 1;
+}
+
+static int hdmi_mod_inject_tty_char(lua_State *l) {
+    lua_check_num_args(1);
+    const char* str = luaL_checkstring(l, 1);
+
+    if (tty_fd < 0) {
+        lua_pushboolean(l, false);
+        return 1;
+    }
+
+    if (str && str[0]) {
+        char ch = str[0];
+        // TIOCSTI - Insert character into TTY input queue
+        if (ioctl(tty_fd, TIOCSTI, &ch) < 0) {
+            MSG("failed to inject char to TTY: " << strerror(errno));
+            lua_pushboolean(l, false);
+            return 1;
+        }
+    }
+
+    lua_pushboolean(l, true);
+    return 1;
+}
+
+static int hdmi_mod_close_tty(lua_State *l) {
+    lua_check_num_args(0);
+    if (tty_fd >= 0) {
+        close(tty_fd);
+        tty_fd = -1;
+        MSG("TTY closed");
+    }
+    return 0;
+}
+
+//
 // module definition
 //
 
@@ -677,6 +765,11 @@ static luaL_Reg func[] = {
     {"stop", hdmi_mod_stop},
     {"is_running", hdmi_mod_is_running},
     {"set_scale", hdmi_mod_set_scale},
+    // Console mode functions
+    {"map_console_to_fb", hdmi_mod_map_console_to_fb},
+    {"open_tty", hdmi_mod_open_tty},
+    {"inject_tty_char", hdmi_mod_inject_tty_char},
+    {"close_tty", hdmi_mod_close_tty},
     // Screen drawing wrapper functions
     {"clear", hdmi_mod_clear},
     {"move", hdmi_mod_move},
