@@ -427,6 +427,10 @@ int send_mirror_to_framebuffer()
     }
     cairo_surface_flush(mirror_surface);
 
+    // Wait for vsync to prevent tearing/flickering
+    int dummy = 0;
+    ioctl(hdmi_fb->fd, FBIO_WAITFORVSYNC, &dummy);
+
     // Get surface data and scale/copy to framebuffer
     unsigned char* data = cairo_image_surface_get_data(mirror_surface);
     if (data != NULL) {
